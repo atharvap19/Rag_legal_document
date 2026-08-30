@@ -1,0 +1,30 @@
+# Secrets - never commit the real API key
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Generated artefacts
+vectorstore/
+evaluation/results/
+
+# Source PDFs may be confidential; keep the folder, ignore its contents
+data/raw/*
+!data/raw/.gitkeep
+
+# Model caches
+.cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

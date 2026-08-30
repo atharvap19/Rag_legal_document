@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legal Document RAG</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --ink: #1a1d21;
+    --muted: #6b7280;
+    --line: #e2e5ea;
+    --accent: #2f5fd0;
+    --accent-soft: #eaf0fd;
+    --good: #17794c;
+    --warn: #a15c00;
+    --bad: #b3261e;
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 32px 20px 72px;
+  }
+
+  header { margin-bottom: 28px; }
+
+  h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+    letter-spacing: -0.01em;
+  }
+
+  .sub { color: var(--muted); font-size: 14px; }
+
+  .sub a { color: var(--accent); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  h2 {
+    margin: 0 0 4px;
+    font-size: 16px;
+  }
+
+  .hint {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 16px;
+  }
+
+  .row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 7px;
+    padding: 9px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  button:hover:not(:disabled) { background: #2650b4; }
+
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  button.secondary {
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+
+  button.secondary:hover:not(:disabled) { background: #f3f4f6; }
+
+  input[type="file"], input[type="text"], select {
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #fff;
+    color: var(--ink);
+  }
+
+  input[type="text"] { flex: 1; min-width: 240px; }
+
+  label.check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .status {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--muted);
+    min-height: 18px;
+  }
+
+  .status.ok { color: var(--good); }
+  .status.err { color: var(--bad); }
+
+  /* Score cards */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .card {
+    background: var(--accent-soft);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+
+  .card .label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .card .value {
+    font-size: 26px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+
+  /* Table */
+  .scroll { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+
+  th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  td.num {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  tr.q { cursor: pointer; }
+  tr.q:hover { background: #fafbfc; }
+
+  .caret { color: var(--muted); font-size: 11px; margin-right: 6px; }
+
+  .detail td {
+    background: #fbfcfd;
+    font-size: 14px;
+  }
+
+  .detail h4 {
+    margin: 12px 0 4px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .detail h4:first-child { margin-top: 0; }
+
+  .detail p { margin: 0; white-space: pre-wrap; }
+
+  .srcs { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+
+  .err-txt { color: var(--bad); }
+
+  .spin {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: -2px;
+    margin-right: 7px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .answer-box {
+    margin-top: 14px;
+    padding: 14px;
+    background: #fbfcfd;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    white-space: pre-wrap;
+  }
+
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Legal Document RAG</h1>
+    <div class="sub">
+      Upload a contract, answer the 12 benchmark questions, and see the evaluation scores.
+      &nbsp;·&nbsp; <a href="/docs" target="_blank">API docs</a>
+    </div>
+  </header>
+
+  <!-- Indexed document -->
+  <section class="panel">
+    <h2>1 &nbsp;Document</h2>
+    <p class="hint">
+      The index is rebuilt from every PDF in <code>data/raw/</code>.
+      Re-uploading a file with the same name replaces it.
+    </p>
+    <div class="row">
+      <input type="file" id="file" accept="application/pdf,.pdf">
+      <button id="uploadBtn">Upload &amp; index</button>
+      <button id="refreshBtn" class="secondary">Refresh status</button>
+    </div>
+    <div class="status" id="upStatus"></div>
+  </section>
+
+  <!-- Ask one question -->
+  <section class="panel">
+    <h2>2 &nbsp;Ask a question</h2>
+    <p class="hint">Free-form query against the indexed document.</p>
+    <div class="row">
+      <input type="text" id="q" placeholder="What are the termination conditions?">
+      <button id="askBtn">Ask</button>
+    </div>
+    <div class="status" id="askStatus"></div>
+    <div class="answer-box hidden" id="answerBox"></div>
+  </section>
+
+  <!-- Evaluation -->
+  <section class="panel">
+    <h2>3 &nbsp;Run the evaluation</h2>
+    <p class="hint">
+      Answers all 12 benchmark questions and scores them with ROUGE-L plus the Gemini judge.
+      A full run makes 24 Gemini calls and takes a couple of minutes.
+    </p>
+    <div class="row">
+      <button id="evalBtn">Run evaluation</button>
+      <select id="limit">
+        <option value="">All 12 questions</option>
+        <option value="2">First 2 (quick test)</option>
+        <option value="5">First 5</option>
+      </select>
+      <label class="check">
+        <input type="checkbox" id="judge" checked>
+        Gemini judge
+      </label>
+    </div>
+    <div class="status" id="evalStatus"></div>
+  </section>
+
+  <!-- Results -->
+  <section class="panel hidden" id="resultsPanel">
+    <h2>Evaluation results</h2>
+    <p class="hint" id="resultsMeta"></p>
+
+    <div class="cards" id="cards"></div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:34px">#</th>
+            <th>Question</th>
+            <th class="num">ROUGE-L</th>
+            <th class="num">Faithful</th>
+            <th class="num">Relevance</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="hint" style="margin:14px 0 0">Click any row to see the generated answer, the reference answer, and the retrieved sources.</p>
+  </section>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function fmt(v) {
+  return (v === null || v === undefined) ? "n/a" : Number(v).toFixed(3);
+}
+
+function setStatus(el, msg, kind, busy) {
+  el.className = "status" + (kind ? " " + kind : "");
+  el.innerHTML = (busy ? '<span class="spin"></span>' : "") + msg;
+}
+
+async function call(url, options) {
+  const res = await fetch(url, options);
+  let body;
+  try { body = await res.json(); } catch { body = null; }
+  if (!res.ok) {
+    const detail = body && body.detail ? body.detail : res.status + " " + res.statusText;
+    throw new Error(detail);
+  }
+  return body;
+}
+
+// ---------- status ----------
+async function refresh() {
+  try {
+    const h = await call("/health");
+    if (h.vector_store_loaded) {
+      setStatus($("upStatus"), `Index loaded — ${h.vectors} vectors.`, "ok");
+    } else {
+      setStatus($("upStatus"), "No index loaded. Upload a PDF to build one.", "err");
+    }
+  } catch (e) {
+    setStatus($("upStatus"), "Cannot reach the API: " + e.message, "err");
+  }
+}
+
+// ---------- upload ----------
+$("uploadBtn").onclick = async () => {
+  const f = $("file").files[0];
+  if (!f) { setStatus($("upStatus"), "Choose a PDF first.", "err"); return; }
+
+  const fd = new FormData();
+  fd.append("file", f);
+
+  $("uploadBtn").disabled = true;
+  setStatus($("upStatus"), "Indexing " + f.name + " — embedding chunks…", "", true);
+
+  try {
+    const r = await call("/upload", { method: "POST", body: fd });
+    setStatus($("upStatus"),
+      `Indexed ${r.uploaded} — ${r.chunks} chunks, ${r.vectors} vectors. ` +
+      `Documents: ${r.documents_indexed.join(", ")}`, "ok");
+  } catch (e) {
+    setStatus($("upStatus"), "Upload failed: " + e.message, "err");
+  } finally {
+    $("uploadBtn").disabled = false;
+  }
+};
+
+$("refreshBtn").onclick = refresh;
+
+// ---------- ask ----------
+$("askBtn").onclick = async () => {
+  const question = $("q").value.trim();
+  if (!question) { setStatus($("askStatus"), "Type a question first.", "err"); return; }
+
+  $("askBtn").disabled = true;
+  $("answerBox").classList.add("hidden");
+  setStatus($("askStatus"), "Retrieving and generating…", "", true);
+
+  try {
+    const r = await call("/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, top_k: 5 })
+    });
+
+    if (r.error) {
+      setStatus($("askStatus"), r.error, "err");
+    } else {
+      setStatus($("askStatus"), "", "");
+      const srcs = (r.sources || [])
+        .map(s => `<li>${s.source_file}, page ${s.page}, chunk ${s.chunk} — similarity ${s.similarity}</li>`)
+        .join("");
+      $("answerBox").innerHTML =
+        `${r.answer}<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280">Sources</h4><ul class="srcs">${srcs}</ul>`;
+      $("answerBox").classList.remove("hidden");
+    }
+  } catch (e) {
+    setStatus($("askStatus"), "Failed: " + e.message, "err");
+  } finally {
+    $("askBtn").disabled = false;
+  }
+};
+
+// ---------- evaluate ----------
+$("evalBtn").onclick = async () => {
+  const limit = $("limit").value;
+  const use_judge = $("judge").checked;
+
+  const payload = { top_k: 5, use_judge: use_judge };
+  if (limit) payload.limit = Number(limit);
+
+  $("evalBtn").disabled = true;
+  const n = limit ? limit : 12;
+  const calls = use_judge ? n * 2 : n;
+  setStatus($("evalStatus"),
+    `Running ${n} question${n == 1 ? "" : "s"} — about ${calls} Gemini calls. This takes a while…`,
+    "", true);
+
+  const started = Date.now();
+
+  try {
+    const r = await call("/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const secs = ((Date.now() - started) / 1000).toFixed(0);
+    setStatus($("evalStatus"), `Done in ${secs}s.`, "ok");
+    render(r);
+  } catch (e) {
+    setStatus($("evalStatus"), "Evaluation failed: " + e.message, "err");
+  } finally {
+    $("evalBtn").disabled = false;
+  }
+};
+
+function render(r) {
+  const a = r.averages;
+
+  $("resultsMeta").textContent =
+    `${r.question_count} questions · top_k ${r.top_k} · judge ` +
+    `${r.judge_enabled ? "on" : "off"} · ${r.documents.join(", ")}`;
+
+  $("cards").innerHTML = `
+    <div class="card"><div class="label">ROUGE-L</div><div class="value">${fmt(a.rouge_l)}</div></div>
+    <div class="card"><div class="label">Faithfulness</div><div class="value">${fmt(a.faithfulness)}</div></div>
+    <div class="card"><div class="label">Answer relevance</div><div class="value">${fmt(a.answer_relevance)}</div></div>
+  `;
+
+  const tbody = $("rows");
+  tbody.innerHTML = "";
+
+  r.results.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    tr.className = "q";
+    tr.innerHTML = `
+      <td class="num">${i + 1}</td>
+      <td><span class="caret">▸</span>${row.question}</td>
+      <td class="num">${fmt(row.rouge_l)}</td>
+      <td class="num">${fmt(row.faithfulness)}</td>
+      <td class="num">${fmt(row.answer_relevance)}</td>
+    `;
+
+    const detail = document.createElement("tr");
+    detail.className = "detail hidden";
+    const srcs = (row.sources || []).map(s => `<li>${s}</li>`).join("");
+    detail.innerHTML = `
+      <td colspan="5">
+        ${row.error ? `<h4>Error</h4><p class="err-txt">${row.error}</p>` : ""}
+        <h4>Generated answer</h4><p>${row.generated_answer || "—"}</p>
+        <h4>Reference answer</h4><p>${row.reference_answer}</p>
+        <h4>Retrieved sources</h4><ul class="srcs">${srcs || "<li>none</li>"}</ul>
+      </td>
+    `;
+
+    tr.onclick = () => {
+      detail.classList.toggle("hidden");
+      tr.querySelector(".caret").textContent =
+        detail.classList.contains("hidden") ? "▸" : "▾";
+    };
+
+    tbody.appendChild(tr);
+    tbody.appendChild(detail);
+  });
+
+  $("resultsPanel").classList.remove("hidden");
+}
+
+refresh();
+</script>
+</body>
+</html>

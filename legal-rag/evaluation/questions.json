@@ -1,0 +1,50 @@
+[
+  {
+    "question": "What are the termination conditions?",
+    "reference_answer": "Either Party may terminate the Agreement without cause by providing thirty days' written notice to the other Party. Either Party may also terminate immediately if the other Party materially breaches the Agreement and fails to remedy the breach within fifteen days after receiving written notice of the breach."
+  },
+  {
+    "question": "How much notice must a party give before terminating the agreement?",
+    "reference_answer": "A Party must provide thirty days' written notice to the other Party to terminate the Agreement without cause."
+  },
+  {
+    "question": "What are the payment terms and when are invoices due?",
+    "reference_answer": "The Service Provider shall issue invoices on the first business day of each month. Each invoice is payable within thirty days of receipt. Any undisputed amount remaining unpaid after its due date may accrue interest at one percent per month until payment is received."
+  },
+  {
+    "question": "What confidentiality obligations do the parties have, and how long do they last?",
+    "reference_answer": "Each Party must keep confidential all non-public business, technical, financial, commercial, and operational information received from the other Party. Confidential Information may not be disclosed to third parties except when disclosure is required by law or necessary to perform the Agreement. These obligations continue during the Agreement and for two years after its termination or expiry."
+  },
+  {
+    "question": "Which law governs this agreement and where are disputes resolved?",
+    "reference_answer": "The Agreement is governed by and interpreted according to the laws of India. Disputes must first be addressed through good-faith negotiation. If a dispute cannot be resolved within thirty days after written notice, either Party may refer it to arbitration in Pune, Maharashtra, under applicable Indian arbitration law. The courts of Pune, Maharashtra have jurisdiction over matters requiring court intervention."
+  },
+  {
+    "question": "How is liability limited, and is there a cap on damages?",
+    "reference_answer": "Neither Party is liable for indirect, incidental, special, exemplary, or consequential damages, including lost profits or lost business. Aggregate liability is capped at the total fees actually paid or payable by the Client to the Service Provider during the twelve months preceding the event giving rise to the claim. The cap does not apply to confidentiality breaches, fraud, willful misconduct, or indemnification obligations."
+  },
+  {
+    "question": "What happens if a party commits a material breach?",
+    "reference_answer": "If a Party materially breaches the Agreement and fails to remedy the breach within fifteen days after receiving written notice of the breach, the other Party may terminate the Agreement immediately."
+  },
+  {
+    "question": "Can either party assign or transfer its rights under the agreement?",
+    "reference_answer": "Neither Party may assign, transfer, or delegate its rights or obligations without the prior written consent of the other Party. Consent may not be unreasonably withheld or delayed. Either Party may assign the Agreement without consent to a successor in connection with a merger, corporate reorganization, or sale of substantially all its assets, provided the successor assumes the applicable obligations."
+  },
+  {
+    "question": "Who owns the intellectual property created under the agreement?",
+    "reference_answer": "Each Party retains ownership of intellectual property it owned or developed before the Agreement. Intellectual property created specifically for the Client under a statement of work belongs to the Client upon the Client's full payment for the applicable work. The Service Provider retains ownership of its general skills, know-how, methods, tools, templates, and reusable software that are not uniquely created for the Client."
+  },
+  {
+    "question": "What are the parties' indemnification obligations?",
+    "reference_answer": "Each Party must indemnify, defend, and hold harmless the other Party and its officers, directors, employees, and agents from third-party claims, damages, losses, liabilities, and reasonable legal expenses arising from the indemnifying Party's material breach, negligence, willful misconduct, or violation of applicable law. The Client is also indemnified for third-party claims alleging that deliverables created specifically by the Service Provider for the Client infringe third-party intellectual property rights."
+  },
+  {
+    "question": "How must formal notices be delivered between the parties?",
+    "reference_answer": "Formal notices must be in writing and delivered by recognized courier, registered mail, or email to the address or email contact designated by the receiving Party. Email notices are deemed received when the sender receives confirmation of successful transmission, provided that no delivery failure message is received."
+  },
+  {
+    "question": "What is the initial term of the agreement and does it renew automatically?",
+    "reference_answer": "The initial term of the Agreement is one year beginning on the effective date. After the initial term, the Agreement automatically renews for successive one-year periods unless either Party gives written notice of non-renewal at least thirty days before the end of the current term."
+  }
+]
