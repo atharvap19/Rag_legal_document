@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+.DS_Store
+
+# fixtures rebuild on demand via `python -m tests.make_fixtures`
+tests/fixtures/*.docx
+
+# extraction JSON written at run time; the .gitkeep stays
+output/*.json

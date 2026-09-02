@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SOP Compliance Checker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>SOP Compliance Checker</h1>
+    <p class="tagline">Upload a <code>.docx</code> to check it against 13 SOP rules.
+      All checks are library- and algorithm-based &mdash; no document renderer, no LLM.</p>
+  </header>
+
+  <main>
+    <section class="uploader" aria-labelledby="upload-heading">
+      <h2 id="upload-heading" class="visually-hidden">Upload</h2>
+
+      <div id="dropzone" class="dropzone" tabindex="0"
+           role="button" aria-label="Choose a .docx file or drop one here">
+        <input id="file-input" type="file" accept=".docx"
+               class="visually-hidden" />
+        <div class="dropzone-inner">
+          <span class="dropzone-icon" aria-hidden="true">&#128196;</span>
+          <p class="dropzone-text">Drop a <strong>.docx</strong> here or
+            <span class="link-like">browse</span></p>
+          <p id="file-name" class="file-name" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <details class="config" id="config-panel">
+        <summary>Optional settings</summary>
+        <p class="config-note">Empty boxes fall back to the default shown in
+          grey &mdash; except the sections list, which has no default.</p>
+        <div class="config-grid">
+          <label>Sections the document must have
+            <input id="cfg-required" type="text"
+                   placeholder="Purpose, Scope, Responsibilities, Procedure, References" />
+            <span class="hint">Separate with commas. Which sections an SOP
+              needs is your call, so this check is skipped until you list
+              them &mdash; the grey text is a common set to start from.</span>
+          </label>
+          <label>Words to skip when spell-checking
+            <input id="cfg-ignore" type="text"
+                   placeholder="Acme, SOP, QMS" />
+            <span class="hint">Brand names, jargon and abbreviations the
+              checker keeps flagging. Separate with commas.</span>
+          </label>
+          <label>Minimum readability score
+            <input id="cfg-flesch" type="number" step="1" placeholder="30" />
+            <span class="hint">0&ndash;100, higher means easier to read.
+              Anything below this is flagged.</span>
+          </label>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button id="analyze-btn" class="btn primary" disabled>Analyze</button>
+        <button id="download-btn" class="btn" disabled>Download findings JSON</button>
+      </div>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="results-section" class="results" hidden
+             aria-labelledby="results-heading">
+      <h2 id="results-heading">Results</h2>
+
+      <div id="summary" class="summary"></div>
+
+      <div class="filters" role="group" aria-label="Filter results">
+        <label>Show
+          <select id="filter-status">
+            <option value="all">All</option>
+            <option value="failed">Failed</option>
+            <option value="passed">Passed</option>
+            <option value="na">Not evaluated</option>
+          </select>
+        </label>
+      </div>
+
+      <ul id="findings" class="findings"></ul>
+    </section>
+
+    <section id="extract-section" class="results" hidden
+             aria-labelledby="extract-heading">
+      <h2 id="extract-heading">Extraction output</h2>
+      <p class="extract-note">The <code>Doc</code> model the extractor built from
+        the file &mdash; exactly what the 13 rules read, before any rule runs.
+        The server also writes this to
+        <code id="extract-path">output/</code>.</p>
+
+      <div class="extract-toolbar">
+        <label class="extract-view">Show
+          <select id="extract-view">
+            <option value="summary">Summary</option>
+            <option value="full">Full JSON</option>
+            <option value="blocks">Blocks</option>
+            <option value="core">Core properties</option>
+            <option value="sections">Sections (headers/footers)</option>
+            <option value="tables">Tables</option>
+            <option value="styles">Styles</option>
+          </select>
+        </label>
+        <span id="extract-size" class="extract-size"></span>
+        <button id="copy-extract-btn" class="btn" type="button">Copy JSON</button>
+        <button id="download-extract-btn" class="btn" type="button">Download extracted JSON</button>
+      </div>
+
+      <pre id="extract-json" class="json-view" tabindex="0"
+           aria-label="Extracted document JSON"></pre>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Rule&nbsp;11 note: a <code>.docx</code> does not record pagination, so page
+      numbering is verified by checking for a <code>PAGE</code> field and flagging
+      hardcoded numbers &mdash; rendered page numbers cannot be verified from XML.</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

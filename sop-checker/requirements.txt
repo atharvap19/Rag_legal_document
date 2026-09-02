@@ -1,0 +1,11 @@
+# Runtime dependencies (the only ones the solution imports).
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+python-docx>=1.1
+lxml>=5.0
+language_tool_python>=2.8
+textstat>=0.7
+python-dateutil>=2.9
+rapidfuzz>=3.0        # rule 1 fuzzy title/filename comparison
+pydantic>=2.7
