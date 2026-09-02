@@ -1,0 +1,14 @@
+# This git repository is rooted at the Windows home directory, so by default
+# every personal file under C:\Users\palan is a candidate for `git add`.
+# That includes .ssh private keys, .claude.json credentials, AppData, browser
+# profiles and NTUSER.DAT -- none of which belong in a public repository.
+#
+# So: ignore everything, then re-admit only the project folders. Nothing new
+# at the top level is ever staged unless it is added to the allow-list below,
+# which makes `git add -A` from this directory safe instead of catastrophic.
+
+/*
+
+!/.gitignore
+!/legal-rag/
+!/sop-checker/
