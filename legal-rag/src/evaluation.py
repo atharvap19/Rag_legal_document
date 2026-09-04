@@ -38,7 +38,10 @@ from pathlib import Path
 from rouge_score import rouge_scorer
 
 from src.rag import answer_question, load_api_key, get_model_name
-from src.vector_store import load_vector_store
+from src.vector_store import (
+    VECTORSTORE_DIR,
+    display_documents
+)
 
 
 # ---------------------------------------------------------
@@ -52,8 +55,6 @@ EVALUATION_DIR = PROJECT_ROOT / "evaluation"
 QUESTIONS_FILE = EVALUATION_DIR / "questions.json"
 
 RESULTS_DIR = EVALUATION_DIR / "results"
-
-VECTORSTORE_DIR = PROJECT_ROOT / "vectorstore"
 
 
 # ---------------------------------------------------------
@@ -211,20 +212,24 @@ Return ONLY valid JSON:
 def evaluate_question(
     question,
     reference_answer,
-    index,
-    metadata,
-    top_k,
-    use_judge=True
+    documents=None,
+    top_k=DEFAULT_TOP_K,
+    use_judge=True,
+    store_dir=VECTORSTORE_DIR
 ):
+    """
+    Answer one benchmark question against the store
+    of the given document and score the answer.
+    """
 
     try:
 
-        # Run RAG
+        # Run RAG against that document store
         generated_answer, results = answer_question(
             question,
-            index=index,
-            metadata=metadata,
-            top_k=top_k
+            documents=documents,
+            top_k=top_k,
+            store_dir=store_dir
         )
 
         # Get retrieved context
@@ -681,6 +686,22 @@ def main():
     )
 
     parser.add_argument(
+        "-d",
+        "--document",
+        default=None,
+        help=(
+            "Document id or PDF filename to evaluate. "
+            "Leave empty to use every document."
+        )
+    )
+
+    parser.add_argument(
+        "--store-dir",
+        type=Path,
+        default=VECTORSTORE_DIR
+    )
+
+    parser.add_argument(
         "--detailed",
         action="store_true",
         help="Show reference and generated answers."
@@ -725,23 +746,17 @@ def main():
     )
 
     # -----------------------------------------------------
-    # Load FAISS
+    # Show which documents are available
     # -----------------------------------------------------
 
-    try:
+    display_documents(args.store_dir)
 
-        index, metadata = load_vector_store(
-            VECTORSTORE_DIR
-        )
-
-    except Exception as error:
+    if args.document:
 
         print(
-            f"ERROR loading vector store: "
-            f"{error}"
+            f"\nEvaluating against document: "
+            f"{args.document}"
         )
-
-        return
 
     # -----------------------------------------------------
     # Run evaluation
@@ -774,11 +789,11 @@ def main():
 
             reference_answer,
 
-            index,
+            args.document,
 
-            metadata,
+            args.top_k,
 
-            args.top_k
+            store_dir=args.store_dir
 
         )
 

@@ -84,11 +84,36 @@ def find_pdfs(data_dir):
 # Load PDFs
 # ---------------------------------------------------------
 
-def load_documents(data_dir):
+def load_pdf(pdf):
     """
-    Load all PDFs using LangChain's PyPDFLoader.
+    Load a single PDF using LangChain's PyPDFLoader.
 
     PyPDFLoader creates one Document object per page.
+    """
+
+    pdf = Path(pdf)
+
+    pages = PyPDFLoader(str(pdf)).load()
+
+    for page in pages:
+
+        # Store useful metadata
+        page.metadata["source_file"] = pdf.name
+
+        # Convert LangChain's 0-based page number
+        # to a human-friendly 1-based page number
+        page_number = page.metadata.get("page", 0)
+
+        page.metadata["page_number"] = (
+            int(page_number) + 1
+        )
+
+    return pages
+
+
+def load_documents(data_dir):
+    """
+    Load every PDF inside the data directory.
     """
 
     documents = []
@@ -96,20 +121,7 @@ def load_documents(data_dir):
     for pdf in find_pdfs(data_dir):
 
         try:
-            pages = PyPDFLoader(str(pdf)).load()
-
-            for page in pages:
-
-                # Store useful metadata
-                page.metadata["source_file"] = pdf.name
-
-                # Convert LangChain's 0-based page number
-                # to a human-friendly 1-based page number
-                page_number = page.metadata.get("page", 0)
-
-                page.metadata["page_number"] = (
-                    int(page_number) + 1
-                )
+            pages = load_pdf(pdf)
 
             documents.extend(pages)
 

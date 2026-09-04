@@ -46,11 +46,11 @@ data/raw/*.pdf
 [ embeddings.py ]    sentence-transformers/all-MiniLM-L6-v2 -> 384-dim
       |              normalised vectors, encoded in batches of 32
       v
-[ vector_store.py ]  FAISS IndexFlatIP + metadata.json, saved to vectorstore/
-      |
+[ vector_store.py ]  one FAISS IndexFlatIP per document, saved with its
+      |              own chunks.json to vectorstore/<document_id>/
       v
-[ retrieval.py ]     embed question -> FAISS search -> top-k chunks,
-      |              near-duplicates removed
+[ retrieval.py ]     embed question -> search that document's own index
+      |              -> top-k chunks
       v
 [ rag.py ]           grounded prompt + system instruction -> Gemini
       |
@@ -67,11 +67,11 @@ searched, so answering is fast.
 | `src/ingestion.py` | Load PDFs, compute corpus statistics |
 | `src/chunking.py` | Split pages into overlapping chunks, chunk statistics |
 | `src/embeddings.py` | Load the embedding model (cached), encode text in batches |
-| `src/vector_store.py` | Create, save and load the FAISS index |
-| `src/retrieval.py` | Embed a question and search the index |
+| `src/vector_store.py` | Create, save and load one FAISS store per document |
+| `src/retrieval.py` | Embed a question and search a document's own index |
 | `src/rag.py` | Build the grounded prompt and call Gemini |
 | `src/evaluation.py` | ROUGE-L, faithfulness and answer relevance |
-| `main.py` | FastAPI app: `/`, `/health`, `/ask` |
+| `main.py` | FastAPI app: `/`, `/health`, `/documents`, `/upload`, `/ask`, `/evaluate` |
 
 ---
 
@@ -153,38 +153,52 @@ python -m src.chunking               # chunk statistics and sample chunks
 
 ---
 
-## Building the Vector Store
+## Building the Vector Stores
 
-After adding or changing PDFs, build the index:
+Every document gets **its own** vector store. Nothing is merged into a shared
+index, so adding one contract never re-embeds the others.
 
 ```bash
 python -m src.vector_store
 ```
 
-This loads the PDFs, chunks them, embeds every chunk and writes:
+This gives each PDF in `data/raw/` its own folder:
 
 ```
-vectorstore/index.faiss      the vectors
-vectorstore/metadata.json    source file, page, chunk index and text per vector
+vectorstore/
+├── registry.json                    which documents are indexed
+├── service_agreement/
+│   ├── index.faiss                  that document's vectors
+│   └── chunks.json                  its chunks: page, chunk index and text
+└── vendor_nda/
+    ├── index.faiss
+    └── chunks.json
 ```
 
-An existing store is reused rather than rebuilt. To force a fresh build after
-changing the documents or the chunk size:
+The folder name (`service_agreement`) is the **document id**, derived from the
+PDF filename. `chunk_index` is the position inside that document's own index,
+so `chunks.json[i]` is always the chunk behind FAISS result `i`.
+
+Documents that already have a store are skipped, so the command only does work
+for new files. Other useful flags:
 
 ```bash
-python -m src.vector_store --rebuild
+python -m src.vector_store --list                 # show what is indexed
+python -m src.vector_store --pdf data/raw/nda.pdf # index one file only
+python -m src.vector_store --rebuild              # rebuild every store
 ```
 
-Test retrieval on its own, without involving Gemini:
+Test retrieval on its own, without involving Gemini. `-d` picks the document to
+search; leave it out to search every store and merge the hits by similarity:
 
 ```bash
-python -m src.retrieval "What are the termination conditions?"
+python -m src.retrieval "What are the termination conditions?" -d service_agreement
 ```
 
 And the full pipeline from the command line:
 
 ```bash
-python -m src.rag "What are the termination conditions?"
+python -m src.rag "What are the termination conditions?" -d service_agreement
 ```
 
 ---
@@ -195,8 +209,10 @@ python -m src.rag "What are the termination conditions?"
 uvicorn main:app --reload
 ```
 
-The index is loaded once at startup. If no index exists the server still
-starts, and `/health` and the web page will tell you to build one.
+At startup any PDF in `data/raw/` without a store gets one. Each store is
+loaded on first use and cached until its files change. If nothing is indexed
+the server still starts, and `/health` and the web page will tell you to
+upload a PDF.
 
 ---
 
@@ -204,11 +220,11 @@ starts, and `/health` and the web page will tell you to build one.
 
 | What | URL |
 | --- | --- |
-| Frontend | http://127.0.0.1:8000/ |
-| Swagger UI | http://127.0.0.1:8000/docs |
-| ReDoc | http://127.0.0.1:8000/redoc |
-| OpenAPI schema | http://127.0.0.1:8000/openapi.json |
-| Health check | http://127.0.0.1:8000/health |
+| Frontend | http://127.0.0.1:8001/ui |
+| Swagger UI | http://127.0.0.1:8001/docs |
+| ReDoc | http://127.0.0.1:8001/redoc |
+| OpenAPI schema | http://127.0.0.1:8001/openapi.json |
+| Health check | http://127.0.0.1:8001/health |
 
 ### Endpoints
 
@@ -217,31 +233,72 @@ starts, and `/health` and the web page will tell you to build one.
 ```json
 {
   "status": "running",
-  "vector_store_loaded": true,
-  "indexed_chunks": 412,
-  "documents": 3,
-  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
-  "gemini_model": "gemini-2.5-flash"
+  "documents_indexed": 3,
+  "vectors": 412
 }
 ```
 
+**`GET /documents`**
+
+Every document that has its own store:
+
+```json
+{
+  "count": 2,
+  "documents": [
+    {
+      "document_id": "service_agreement",
+      "source_file": "service_agreement.pdf",
+      "page_count": 14,
+      "chunk_count": 212,
+      "embedding_dimension": 384,
+      "created_at": "2026-09-02T11:22:00+00:00"
+    }
+  ]
+}
+```
+
+**`POST /upload`**
+
+Saves the PDF into `data/raw/` and builds a store for **that file only**. Every
+other document keeps its existing index.
+
+**`DELETE /documents/{document}`**
+
+Removes one document's index and chunks file. Because the stores are separate,
+nothing else has to be rebuilt.
+
 **`POST /ask`**
+
+`document` is a document id or a PDF filename. Leave it out to search every
+store and merge the results by similarity.
 
 Request:
 
 ```json
-{ "question": "What are the termination conditions?" }
+{
+  "question": "What are the termination conditions?",
+  "top_k": 5,
+  "document": "service_agreement"
+}
 ```
 
 Response:
 
 ```json
 {
-  "answer": "Either party may terminate for convenience upon thirty (30) days prior written notice [contract1.pdf, page 4, chunk 12]. ...\n\nDisclaimer: ...",
+  "question": "What are the termination conditions?",
+  "document": "service_agreement",
+  "answer": "Either party may terminate for convenience upon thirty (30) days prior written notice [service_agreement.pdf, page 4, chunk 12].",
   "sources": [
-    { "document": "contract1.pdf", "page": 4, "chunk": 12, "similarity": 0.7421 }
-  ],
-  "model": "gemini-2.5-flash"
+    {
+      "document_id": "service_agreement",
+      "source_file": "service_agreement.pdf",
+      "page": 4,
+      "chunk": 12,
+      "similarity": 0.7421
+    }
+  ]
 }
 ```
 
@@ -252,7 +309,8 @@ Error responses carry a `detail` message:
 | 422 | The question failed validation (empty, or shorter than 3 characters) |
 | 500 | `GEMINI_API_KEY` is missing or invalid |
 | 502 | The Gemini API call failed |
-| 503 | No vector store has been built yet |
+| 404 | The requested `document` is not indexed |
+| 409 | No documents have been indexed yet |
 
 You can try `/ask` directly from the Swagger page at `/docs`.
 
@@ -375,14 +433,14 @@ legal decision. Consult a qualified lawyer.
 ```
 legal-rag/
 ├── data/raw/               your PDF documents go here
-├── vectorstore/            generated FAISS index + metadata
+├── vectorstore/            one FAISS index + chunks.json per document
 ├── src/
 │   ├── __init__.py         shared path constants
 │   ├── ingestion.py        Task 1 - PDF loading and corpus statistics
 │   ├── chunking.py         Task 2 - text splitting and chunk statistics
 │   ├── embeddings.py       Task 3 - sentence-transformers embeddings
-│   ├── vector_store.py     Task 4 - FAISS create / save / load
-│   ├── retrieval.py        Task 5 - top-k search with de-duplication
+│   ├── vector_store.py     Task 4 - per-document FAISS create / save / load
+│   ├── retrieval.py        Task 5 - top-k search inside a document's store
 │   ├── rag.py              Task 6 - grounded Gemini generation
 │   └── evaluation.py       ROUGE-L, faithfulness, answer relevance
 ├── frontend/

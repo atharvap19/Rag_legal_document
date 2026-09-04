@@ -247,15 +247,22 @@
 
   <!-- Indexed document -->
   <section class="panel">
-    <h2>1 &nbsp;Document</h2>
+    <h2>1 &nbsp;Documents</h2>
     <p class="hint">
-      The index is rebuilt from every PDF in <code>data/raw/</code>.
-      Re-uploading a file with the same name replaces it.
+      Every PDF gets its own vector store in
+      <code>vectorstore/&lt;document_id&gt;/</code>.
+      Uploading indexes only that file &mdash; the other documents keep their own index.
     </p>
     <div class="row">
       <input type="file" id="file" accept="application/pdf,.pdf">
       <button id="uploadBtn">Upload &amp; index</button>
       <button id="refreshBtn" class="secondary">Refresh status</button>
+    </div>
+    <div class="row">
+      <label class="check" for="doc">Active document</label>
+      <select id="doc">
+        <option value="">All documents</option>
+      </select>
     </div>
     <div class="status" id="upStatus"></div>
   </section>
@@ -263,7 +270,7 @@
   <!-- Ask one question -->
   <section class="panel">
     <h2>2 &nbsp;Ask a question</h2>
-    <p class="hint">Free-form query against the indexed document.</p>
+    <p class="hint">Free-form query, answered from the selected document&rsquo;s own vector store.</p>
     <div class="row">
       <input type="text" id="q" placeholder="What are the termination conditions?">
       <button id="askBtn">Ask</button>
@@ -344,13 +351,34 @@ async function call(url, options) {
 }
 
 // ---------- status ----------
-async function refresh() {
+function selectedDoc() {
+  return $("doc").value || null;
+}
+
+function fillDocs(docs, keep) {
+  const sel = $("doc");
+  const wanted = keep || sel.value;
+
+  sel.innerHTML = '<option value="">All documents</option>' +
+    docs.map(d =>
+      `<option value="${d.document_id}">${d.source_file} (${d.chunk_count} chunks)</option>`
+    ).join("");
+
+  if (wanted && docs.some(d => d.document_id === wanted)) sel.value = wanted;
+}
+
+async function refresh(keep) {
   try {
-    const h = await call("/health");
-    if (h.vector_store_loaded) {
-      setStatus($("upStatus"), `Index loaded — ${h.vectors} vectors.`, "ok");
+    const r = await call("/documents");
+    fillDocs(r.documents, keep);
+
+    if (r.count) {
+      const total = r.documents.reduce((n, d) => n + d.chunk_count, 0);
+      setStatus($("upStatus"),
+        `${r.count} document${r.count == 1 ? "" : "s"}, ` +
+        `${r.count} separate vector store${r.count == 1 ? "" : "s"} — ${total} vectors.`, "ok");
     } else {
-      setStatus($("upStatus"), "No index loaded. Upload a PDF to build one.", "err");
+      setStatus($("upStatus"), "No documents indexed. Upload a PDF to build one.", "err");
     }
   } catch (e) {
     setStatus($("upStatus"), "Cannot reach the API: " + e.message, "err");
@@ -370,9 +398,10 @@ $("uploadBtn").onclick = async () => {
 
   try {
     const r = await call("/upload", { method: "POST", body: fd });
+    await refresh(r.document.document_id);
     setStatus($("upStatus"),
-      `Indexed ${r.uploaded} — ${r.chunks} chunks, ${r.vectors} vectors. ` +
-      `Documents: ${r.documents_indexed.join(", ")}`, "ok");
+      `Indexed ${r.uploaded} into its own store — ${r.chunks} chunks, ` +
+      `${r.vectors} vectors. Documents: ${r.documents_indexed.join(", ")}`, "ok");
   } catch (e) {
     setStatus($("upStatus"), "Upload failed: " + e.message, "err");
   } finally {
@@ -380,7 +409,7 @@ $("uploadBtn").onclick = async () => {
   }
 };
 
-$("refreshBtn").onclick = refresh;
+$("refreshBtn").onclick = () => refresh();
 
 // ---------- ask ----------
 $("askBtn").onclick = async () => {
@@ -395,7 +424,7 @@ $("askBtn").onclick = async () => {
     const r = await call("/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, top_k: 5 })
+      body: JSON.stringify({ question, top_k: 5, document: selectedDoc() })
     });
 
     if (r.error) {
@@ -421,7 +450,7 @@ $("evalBtn").onclick = async () => {
   const limit = $("limit").value;
   const use_judge = $("judge").checked;
 
-  const payload = { top_k: 5, use_judge: use_judge };
+  const payload = { top_k: 5, use_judge: use_judge, document: selectedDoc() };
   if (limit) payload.limit = Number(limit);
 
   $("evalBtn").disabled = true;

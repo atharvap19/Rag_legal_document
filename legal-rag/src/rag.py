@@ -3,7 +3,11 @@
 Task 6: Retrieval-Augmented Generation with Gemini
 
 Takes a user question, retrieves relevant legal chunks
-from FAISS, and asks Gemini to generate a grounded answer.
+from the vector store of the chosen document, and asks
+Gemini to generate a grounded answer.
+
+Every document has its own FAISS index, so a question
+about one contract only ever reads that contract's store.
 """
 
 import argparse
@@ -14,8 +18,14 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from src.retrieval import retrieve
-from src.vector_store import load_vector_store
+from src.retrieval import (
+    retrieve,
+    retrieve_from_documents
+)
+from src.vector_store import (
+    VECTORSTORE_DIR,
+    display_documents
+)
 
 
 # ---------------------------------------------------------
@@ -23,8 +33,6 @@ from src.vector_store import load_vector_store
 # ---------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-VECTORSTORE_DIR = PROJECT_ROOT / "vectorstore"
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 
@@ -99,35 +107,41 @@ def build_context(results):
 # Build Gemini prompt
 # ---------------------------------------------------------
 
-def build_prompt(
-    question,
-    context
-):
-
+def build_prompt(question, context):
     return f"""
-You are a legal document analysis assistant.
+You are a legal document question-answering assistant.
 
-Answer the question ONLY using the provided
-legal document context.
+Answer the question using ONLY the information contained in the
+RETRIEVED CONTEXT below.
 
-Do not invent information.
+Rules:
+- Use only information explicitly supported by the retrieved context.
+- Do not use outside knowledge or invent information.
+- Examine ALL retrieved chunks and use every chunk that is relevant.
+- You may combine information from multiple relevant chunks to form
+  one complete answer.
+- Ignore chunks that are unrelated to the question.
+- If the answer is only partially supported, provide only the supported
+  information and clearly state what cannot be determined.
+- Do not reject the question simply because the information is spread
+  across multiple chunks.
+- Cite each important statement using:
+  [source_file, page X, chunk Y]
+- Only cite chunks that actually support the statement.
+- Do not mention similarity scores, embeddings, retrieval, or ranking.
 
-If the answer is not available in the context,
-say:
+If the retrieved context genuinely does not contain enough information
+to answer the question, respond exactly with:
 
-"I could not find sufficient information in the
-provided documents to answer this question."
-
-Include the source of the information using
-the format:
-
-[source_file, page X, chunk Y]
+"I could not find sufficient information in the provided documents to answer this question."
 
 Question:
 {question}
 
 Retrieved Context:
 {context}
+
+Answer:
 """
 
 
@@ -174,46 +188,28 @@ def generate_answer(
 
 
 # ---------------------------------------------------------
-# Complete RAG pipeline
+# Turn retrieved chunks into an answer
 # ---------------------------------------------------------
 
-def answer_question(
+NO_ANSWER = (
+    "I could not find sufficient information "
+    "in the provided documents to answer "
+    "this question."
+)
+
+
+def answer_from_results(
     question,
-    index,
-    metadata,
-    top_k=DEFAULT_TOP_K
+    results
 ):
-
-    # ---------------------------------------------
-    # Retrieve relevant chunks
-    # ---------------------------------------------
-
-    results = retrieve(
-        query=question,
-        index=index,
-        metadata=metadata,
-        k=top_k
-    )
+    """Build the context and ask Gemini."""
 
     if not results:
-
-        return (
-            "I could not find sufficient information "
-            "in the provided documents to answer "
-            "this question."
-        ), []
-
-    # ---------------------------------------------
-    # Build context
-    # ---------------------------------------------
+        return NO_ANSWER, []
 
     context = build_context(
         results
     )
-
-    # ---------------------------------------------
-    # Ask Gemini
-    # ---------------------------------------------
 
     answer = generate_answer(
         question,
@@ -221,6 +217,66 @@ def answer_question(
     )
 
     return answer, results
+
+
+# ---------------------------------------------------------
+# Complete RAG pipeline
+# ---------------------------------------------------------
+
+def answer_question(
+    question,
+    documents=None,
+    top_k=DEFAULT_TOP_K,
+    store_dir=VECTORSTORE_DIR
+):
+    """
+    Answer a question against the vector store of one
+    document.
+
+    documents:
+        None  -> every indexed document, each searched
+                 in its own store
+        str   -> a single document id or PDF filename
+        list  -> those documents
+    """
+
+    results = retrieve_from_documents(
+        query=question,
+        documents=documents,
+        k=top_k,
+        store_dir=store_dir
+    )
+
+    return answer_from_results(
+        question,
+        results
+    )
+
+
+def answer_with_store(
+    question,
+    index,
+    metadata,
+    top_k=DEFAULT_TOP_K,
+    doc_id=None
+):
+    """
+    Answer a question using a store that is already
+    loaded in memory.
+    """
+
+    results = retrieve(
+        query=question,
+        index=index,
+        metadata=metadata,
+        k=top_k,
+        doc_id=doc_id
+    )
+
+    return answer_from_results(
+        question,
+        results
+    )
 
 
 # ---------------------------------------------------------
@@ -307,31 +363,23 @@ def main():
     )
 
     parser.add_argument(
+        "-d",
+        "--document",
+        default=None,
+        help=(
+            "Document id or PDF filename to ask about. "
+            "Leave empty to use every document."
+        )
+    )
+
+    parser.add_argument(
         "--store-dir",
         type=Path,
         default=VECTORSTORE_DIR,
-        help="FAISS vector store location."
+        help="Folder holding the per-document stores."
     )
 
     args = parser.parse_args()
-
-    # ---------------------------------------------
-    # Load FAISS
-    # ---------------------------------------------
-
-    try:
-
-        index, metadata = load_vector_store(
-            args.store_dir
-        )
-
-    except Exception as error:
-
-        print(
-            f"Error loading vector store: {error}"
-        )
-
-        return 1
 
     # ---------------------------------------------
     # Run RAG
@@ -341,9 +389,9 @@ def main():
 
         answer, results = answer_question(
             question=args.question,
-            index=index,
-            metadata=metadata,
-            top_k=args.top_k
+            documents=args.document,
+            top_k=args.top_k,
+            store_dir=args.store_dir
         )
 
     except Exception as error:
@@ -351,6 +399,8 @@ def main():
         print(
             f"Error running RAG: {error}"
         )
+
+        display_documents(args.store_dir)
 
         return 1
 

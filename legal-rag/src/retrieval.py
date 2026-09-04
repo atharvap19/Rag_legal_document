@@ -1,8 +1,13 @@
 """
 Task 5: Retrieval
 
-Converts a question into an embedding and searches
-the FAISS vector store for the most relevant chunks.
+Converts a question into an embedding and searches the
+FAISS store that belongs to one document.
+
+Each document has its own index, so a search reads that
+document's index directly. When several documents are
+requested, each store is searched on its own and the
+results are merged by similarity.
 """
 
 import argparse
@@ -15,7 +20,13 @@ from src.embeddings import (
     embed_query
 )
 
-from src.vector_store import load_vector_store
+from src.vector_store import (
+    VECTORSTORE_DIR,
+    document_ids,
+    get_document_store,
+    resolve_document_id,
+    display_documents
+)
 
 
 # ---------------------------------------------------------
@@ -24,23 +35,43 @@ from src.vector_store import load_vector_store
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-VECTORSTORE_DIR = PROJECT_ROOT / "vectorstore"
-
 DEFAULT_TOP_K = 5
 
 
 # ---------------------------------------------------------
-# Retrieve relevant chunks
+# Embed the question
+# ---------------------------------------------------------
+
+def encode_query(query):
+    """Turn the question into a 2D float32 array."""
+
+    model = load_embedding_model()
+
+    query_embedding = embed_query(
+        query,
+        model=model
+    )
+
+    return np.asarray(
+        query_embedding,
+        dtype="float32"
+    ).reshape(1, -1)
+
+
+# ---------------------------------------------------------
+# Retrieve from a single loaded store
 # ---------------------------------------------------------
 
 def retrieve(
     query,
     index,
     metadata,
-    k=DEFAULT_TOP_K
+    k=DEFAULT_TOP_K,
+    doc_id=None
 ):
     """
-    Search FAISS using the question embedding.
+    Search one document's FAISS index using the
+    question embedding.
     """
 
     if not query.strip():
@@ -53,20 +84,10 @@ def retrieve(
             "k must be at least 1."
         )
 
-    # Load embedding model
-    model = load_embedding_model()
+    if index.ntotal == 0:
+        return []
 
-    # Convert question to embedding
-    query_embedding = embed_query(
-        query,
-        model=model
-    )
-
-    # FAISS needs a 2D NumPy array
-    query_embedding = np.asarray(
-        query_embedding,
-        dtype="float32"
-    ).reshape(1, -1)
+    query_embedding = encode_query(query)
 
     # Search FAISS
     scores, positions = index.search(
@@ -92,6 +113,9 @@ def retrieve(
             "similarity":
                 float(score),
 
+            "document_id":
+                doc_id,
+
             "source_file":
                 chunk["source_file"],
 
@@ -106,6 +130,105 @@ def retrieve(
         })
 
     return results
+
+
+# ---------------------------------------------------------
+# Retrieve from a document by id
+# ---------------------------------------------------------
+
+def retrieve_from_document(
+    query,
+    doc_id,
+    k=DEFAULT_TOP_K,
+    store_dir=VECTORSTORE_DIR
+):
+    """
+    Open the store belonging to one document and search
+    only that index.
+    """
+
+    index, metadata = get_document_store(
+        doc_id,
+        store_dir
+    )
+
+    return retrieve(
+        query,
+        index,
+        metadata,
+        k,
+        doc_id=doc_id
+    )
+
+
+# ---------------------------------------------------------
+# Retrieve across several documents
+# ---------------------------------------------------------
+
+def retrieve_from_documents(
+    query,
+    documents=None,
+    k=DEFAULT_TOP_K,
+    store_dir=VECTORSTORE_DIR
+):
+    """
+    Search one store per document and merge the hits by
+    similarity. The indexes stay separate; only the
+    result lists are combined.
+
+    documents:
+        None  -> every indexed document
+        str   -> a single document id or filename
+        list  -> those documents
+    """
+
+    if documents is None:
+        selected = document_ids(store_dir)
+
+    elif isinstance(documents, str):
+        selected = [
+            resolve_document_id(documents, store_dir)
+        ]
+
+    else:
+        selected = [
+            resolve_document_id(name, store_dir)
+            for name in documents
+        ]
+
+    if not selected:
+        raise ValueError(
+            "No documents have been indexed yet."
+        )
+
+    merged = []
+
+    for doc_id in selected:
+
+        merged.extend(
+            retrieve_from_document(
+                query,
+                doc_id,
+                k,
+                store_dir
+            )
+        )
+
+    # Best matches first, whichever store they came from
+    merged.sort(
+        key=lambda result: result["similarity"],
+        reverse=True
+    )
+
+    merged = merged[:k]
+
+    for rank, result in enumerate(
+        merged,
+        start=1
+    ):
+        result["rank"] = rank
+
+    return merged
 
 
 # ---------------------------------------------------------
@@ -143,6 +266,11 @@ def display_results(
             f"\n[{result['rank']}] "
             f"Similarity: "
             f"{result['similarity']:.4f}"
+        )
+
+        print(
+            f"Document: "
+            f"{result['document_id']}"
         )
 
         print(
@@ -198,6 +326,16 @@ def main():
     )
 
     parser.add_argument(
+        "-d",
+        "--document",
+        default=None,
+        help=(
+            "Document id or PDF filename to search. "
+            "Leave empty to search every document."
+        )
+    )
+
+    parser.add_argument(
         "--store-dir",
         type=Path,
         default=VECTORSTORE_DIR
@@ -205,28 +343,25 @@ def main():
 
     args = parser.parse_args()
 
-    # Load FAISS index and metadata
+    # Retrieve chunks
     try:
 
-        index, metadata = load_vector_store(
-            args.store_dir
+        results = retrieve_from_documents(
+            query=args.query,
+            documents=args.document,
+            k=args.top_k,
+            store_dir=args.store_dir
         )
 
     except Exception as error:
 
         print(
-            f"Error loading vector store: {error}"
+            f"Error retrieving chunks: {error}"
         )
 
-        return 1
+        display_documents(args.store_dir)
 
-    # Retrieve chunks
-    results = retrieve(
-        query=args.query,
-        index=index,
-        metadata=metadata,
-        k=args.top_k
-    )
+        return 1
 
     # Display results
     display_results(

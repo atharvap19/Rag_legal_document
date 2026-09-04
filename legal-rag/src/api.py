@@ -1,25 +1,24 @@
 
 """
 FastAPI backend for the Legal RAG application.
+
+Each document has its own FAISS index and chunks file
+inside vectorstore/<document_id>/, so a question is
+answered from the store of the document it names.
 """
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.rag import answer_question
-from src.vector_store import load_vector_store
-
-
-# ---------------------------------------------------------
-# Settings
-# ---------------------------------------------------------
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-VECTORSTORE_DIR = PROJECT_ROOT / "vectorstore"
+from src.vector_store import (
+    VECTORSTORE_DIR,
+    list_documents,
+    resolve_document_id
+)
 
 
 # ---------------------------------------------------------
@@ -29,7 +28,7 @@ VECTORSTORE_DIR = PROJECT_ROOT / "vectorstore"
 app = FastAPI(
     title="Legal RAG API",
     description="Legal Document Analysis using RAG",
-    version="1.0"
+    version="2.0"
 )
 
 
@@ -47,28 +46,36 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------
-# Load FAISS
+# Indexed documents
 # ---------------------------------------------------------
 
-try:
+def indexed_documents():
 
-    index, metadata = load_vector_store(
-        VECTORSTORE_DIR
-    )
+    return list_documents(VECTORSTORE_DIR)
 
-    print(
-        f"Loaded FAISS vector store "
-        f"with {index.ntotal} vectors."
-    )
 
-except Exception as error:
+def resolve_requested_document(name):
+    """
+    Turn the document sent by the client into a document
+    id, or None to use every document.
+    """
 
-    index = None
-    metadata = None
+    if not name:
+        return None
 
-    print(
-        f"Could not load vector store: {error}"
-    )
+    try:
+
+        return resolve_document_id(
+            name,
+            VECTORSTORE_DIR
+        )
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(error)
+        )
 
 
 # ---------------------------------------------------------
@@ -80,6 +87,14 @@ class QuestionRequest(BaseModel):
     question: str
 
     top_k: int = 5
+
+    document: str | None = Field(
+        None,
+        description=(
+            "Document id or PDF filename to search. "
+            "Leave empty to search every document."
+        )
+    )
 
 
 # ---------------------------------------------------------
@@ -101,9 +116,32 @@ def home():
 @app.get("/health")
 def health():
 
+    documents = indexed_documents()
+
     return {
         "status": "running",
-        "vector_store_loaded": index is not None
+
+        "documents_indexed": len(documents),
+
+        "vectors": sum(
+            entry["chunk_count"]
+            for entry in documents
+        )
+    }
+
+
+# ---------------------------------------------------------
+# Indexed documents
+# ---------------------------------------------------------
+
+@app.get("/documents")
+def get_documents():
+
+    documents = indexed_documents()
+
+    return {
+        "count": len(documents),
+        "documents": documents
     }
 
 
@@ -116,10 +154,10 @@ def ask_question(
     request: QuestionRequest
 ):
 
-    if index is None:
+    if not indexed_documents():
 
         return {
-            "error": "Vector store is not loaded."
+            "error": "No documents indexed yet."
         }
 
     if not request.question.strip():
@@ -128,13 +166,17 @@ def ask_question(
             "error": "Question cannot be empty."
         }
 
+    doc_id = resolve_requested_document(
+        request.document
+    )
+
     try:
 
         answer, results = answer_question(
             question=request.question,
-            index=index,
-            metadata=metadata,
-            top_k=request.top_k
+            documents=doc_id,
+            top_k=request.top_k,
+            store_dir=VECTORSTORE_DIR
         )
 
         sources = []
@@ -142,6 +184,9 @@ def ask_question(
         for result in results:
 
             sources.append({
+                "document_id":
+                    result["document_id"],
+
                 "source_file":
                     result["source_file"],
 
@@ -162,6 +207,9 @@ def ask_question(
             "question":
                 request.question,
 
+            "document":
+                doc_id,
+
             "answer":
                 answer,
 
@@ -174,4 +222,3 @@ def ask_question(
         return {
             "error": str(error)
         }
-

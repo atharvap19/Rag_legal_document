@@ -1,4 +1,3 @@
-
 """
 Main application for the Legal Document RAG system.
 
@@ -6,16 +5,20 @@ Run from the project root:
 
     python main.py
 
+Every uploaded PDF gets its own FAISS index and its own
+chunks file inside vectorstore/<document_id>/. Uploading a
+new contract only builds that contract's store; nothing
+else is re-indexed. A question is answered from the store
+of the document it names.
+
 The application will:
 
-1. Check whether the FAISS vector store exists.
-2. Build it automatically if it does not exist.
-3. Load the vector store.
-4. Start the FastAPI server.
+1. Give every PDF in data/raw/ its own vector store.
+2. Start the FastAPI server.
 
 Open:
-    http://127.0.0.1:8000/docs   (API documentation)
-    http://127.0.0.1:8000/ui     (simple frontend)
+    http://127.0.0.1:8001/docs   (API documentation)
+    http://127.0.0.1:8001/ui     (simple frontend)
 """
 
 from contextlib import asynccontextmanager
@@ -27,8 +30,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.vector_store import (
-    build_vector_store,
-    load_vector_store
+    build_all_stores,
+    build_document_store,
+    delete_document_store,
+    display_documents,
+    list_documents,
+    resolve_document_id
 )
 from src.rag import answer_question
 from src.evaluation import (
@@ -50,62 +57,87 @@ VECTORSTORE_DIR = PROJECT_ROOT / "vectorstore"
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 
+CHUNK_SIZE = 256
+
+CHUNK_OVERLAP = 50
+
+# Port 8000 is left to the sop-checker app, which mounts its
+# UI at the root path and would otherwise clash here.
+HOST = "127.0.0.1"
+
+PORT = 8001
+
 
 # ---------------------------------------------------------
-# Vector store
+# Vector stores
 # ---------------------------------------------------------
 
-index = None
-metadata = None
+def setup_vector_stores():
+    """
+    Make sure every PDF in data/raw/ has its own store.
+
+    Documents that are already indexed are left alone, so
+    startup only does work for new files.
+    """
+
+    entries = build_all_stores(
+        data_dir=DATA_DIR,
+        store_dir=VECTORSTORE_DIR,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP
+    )
+
+    display_documents(VECTORSTORE_DIR)
+
+    return entries
 
 
-def setup_vector_store():
+def indexed_documents():
+    """The documents that currently have a store."""
 
-    global index
-    global metadata
+    return list_documents(VECTORSTORE_DIR)
 
-    index_file = VECTORSTORE_DIR / "index.faiss"
-    metadata_file = VECTORSTORE_DIR / "metadata.json"
 
-    # -----------------------------------------------------
-    # If vector store already exists
-    # -----------------------------------------------------
+def require_documents():
+    """Fail cleanly when nothing has been indexed yet."""
 
-    if index_file.exists() and metadata_file.exists():
+    documents = indexed_documents()
 
-        print("\nVector store already exists.")
+    if not documents:
 
-        index, metadata = load_vector_store(
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No documents indexed yet. "
+                "Upload a PDF first."
+            )
+        )
+
+    return documents
+
+
+def resolve_requested_document(name):
+    """
+    Turn the document sent by the client into a document
+    id, or None to use every document.
+    """
+
+    if not name:
+        return None
+
+    try:
+
+        return resolve_document_id(
+            name,
             VECTORSTORE_DIR
         )
 
-        print(
-            f"Loaded {index.ntotal} vectors."
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(error)
         )
-
-        return
-
-
-    # -----------------------------------------------------
-    # Otherwise build it
-    # -----------------------------------------------------
-
-    print("\nVector store not found.")
-
-    print("Building vector store...")
-
-    index, metadata = build_vector_store(
-        data_dir=DATA_DIR,
-        store_dir=VECTORSTORE_DIR,
-        chunk_size=256,
-        chunk_overlap=50
-    )
-
-    print("\nVector store created successfully.")
-
-    print(
-        f"Vectors indexed: {index.ntotal}"
-    )
 
 
 # ---------------------------------------------------------
@@ -115,19 +147,19 @@ def setup_vector_store():
 @asynccontextmanager
 async def lifespan(app):
 
-    # Only load if it was not already prepared by __main__
-    if index is None:
+    try:
 
-        try:
+        setup_vector_stores()
 
-            setup_vector_store()
+    except Exception as error:
 
-        except Exception as error:
+        print(
+            f"No vector stores at startup: {error}"
+        )
 
-            print(
-                f"Vector store unavailable at startup: "
-                f"{error}"
-            )
+        print(
+            "Upload a PDF at /ui to build one."
+        )
 
     yield
 
@@ -140,10 +172,12 @@ app = FastAPI(
     title="Legal Document RAG",
     description=(
         "Question answering over legal PDF documents.\n\n"
-        "Upload a contract, answer the 12 benchmark "
-        "questions, and view the RAG evaluation scores."
+        "Each document is stored in its own FAISS index "
+        "with its own chunks file. Upload a contract, "
+        "answer the 12 benchmark questions, and view the "
+        "RAG evaluation scores."
     ),
-    version="1.0",
+    version="2.0",
     lifespan=lifespan
 )
 
@@ -174,6 +208,14 @@ class QuestionRequest(BaseModel):
 
     top_k: int = 5
 
+    document: str | None = Field(
+        None,
+        description=(
+            "Document id or PDF filename to search. "
+            "Leave empty to search every document."
+        )
+    )
+
 
 class EvaluateRequest(BaseModel):
 
@@ -203,6 +245,14 @@ class EvaluateRequest(BaseModel):
         )
     )
 
+    document: str | None = Field(
+        None,
+        description=(
+            "Document id or PDF filename to evaluate. "
+            "Leave empty to use every document."
+        )
+    )
+
 
 # ---------------------------------------------------------
 # Home
@@ -223,14 +273,38 @@ def home():
 @app.get("/health")
 def health():
 
+    documents = indexed_documents()
+
     return {
         "status": "running",
 
-        "vector_store_loaded":
-            index is not None,
+        "documents_indexed":
+            len(documents),
 
         "vectors":
-            index.ntotal if index else 0
+            sum(
+                entry["chunk_count"]
+                for entry in documents
+            )
+    }
+
+
+# ---------------------------------------------------------
+# Indexed documents
+# ---------------------------------------------------------
+
+@app.get("/documents")
+def get_documents():
+    """
+    Every indexed document, each with its own FAISS index
+    and chunks file.
+    """
+
+    documents = indexed_documents()
+
+    return {
+        "count": len(documents),
+        "documents": documents
     }
 
 
@@ -274,15 +348,13 @@ async def upload_document(
     )
 ):
     """
-    Save a PDF into data/raw/ and rebuild the FAISS
-    index from every PDF in that folder.
+    Save a PDF into data/raw/ and build a vector store
+    just for that file.
 
-    Uploading a file that already exists replaces it.
-    Nothing else in data/raw/ is deleted.
+    Uploading a file that already exists replaces it and
+    rebuilds only its store. Every other document keeps
+    its own index untouched.
     """
-
-    global index
-    global metadata
 
     filename = Path(file.filename or "").name
 
@@ -311,14 +383,14 @@ async def upload_document(
 
     destination.write_bytes(contents)
 
-    # Rebuild the index over the whole corpus
+    # Index this document on its own
     try:
 
-        index, metadata = build_vector_store(
-            data_dir=DATA_DIR,
+        entry, index, metadata = build_document_store(
+            destination,
             store_dir=VECTORSTORE_DIR,
-            chunk_size=256,
-            chunk_overlap=50
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP
         )
 
     except Exception as error:
@@ -328,19 +400,49 @@ async def upload_document(
             detail=f"Indexing failed: {error}"
         )
 
-    documents = sorted({
-        record["source_file"]
-        for record in metadata
-    })
-
     return {
         "uploaded": filename,
 
-        "documents_indexed": documents,
+        "document": entry,
 
-        "chunks": len(metadata),
+        "chunks": entry["chunk_count"],
 
-        "vectors": index.ntotal
+        "vectors": index.ntotal,
+
+        "documents_indexed": [
+            item["document_id"]
+            for item in indexed_documents()
+        ]
+    }
+
+
+# ---------------------------------------------------------
+# Remove a document
+# ---------------------------------------------------------
+
+@app.delete("/documents/{document}")
+def remove_document(document: str):
+    """
+    Delete one document's vector store and chunks file.
+
+    Because stores are separate, nothing else has to be
+    rebuilt.
+    """
+
+    doc_id = resolve_requested_document(document)
+
+    delete_document_store(
+        doc_id,
+        VECTORSTORE_DIR
+    )
+
+    return {
+        "deleted": doc_id,
+
+        "documents_indexed": [
+            item["document_id"]
+            for item in indexed_documents()
+        ]
     }
 
 
@@ -351,12 +453,7 @@ async def upload_document(
 @app.post("/ask")
 def ask(request: QuestionRequest):
 
-    if index is None:
-
-        return {
-            "error": "Vector store is not loaded."
-        }
-
+    require_documents()
 
     if not request.question.strip():
 
@@ -364,17 +461,19 @@ def ask(request: QuestionRequest):
             "error": "Question cannot be empty."
         }
 
+    doc_id = resolve_requested_document(
+        request.document
+    )
 
     try:
 
-        # Run RAG
+        # Run RAG against that document's own store
         answer, results = answer_question(
             question=request.question,
-            index=index,
-            metadata=metadata,
-            top_k=request.top_k
+            documents=doc_id,
+            top_k=request.top_k,
+            store_dir=VECTORSTORE_DIR
         )
-
 
         # Format sources
         sources = []
@@ -382,6 +481,9 @@ def ask(request: QuestionRequest):
         for result in results:
 
             sources.append({
+
+                "document_id":
+                    result["document_id"],
 
                 "source_file":
                     result["source_file"],
@@ -399,11 +501,13 @@ def ask(request: QuestionRequest):
                     )
             })
 
-
         return {
 
             "question":
                 request.question,
+
+            "document":
+                doc_id,
 
             "answer":
                 answer,
@@ -411,7 +515,6 @@ def ask(request: QuestionRequest):
             "sources":
                 sources
         }
-
 
     except Exception as error:
 
@@ -427,20 +530,19 @@ def ask(request: QuestionRequest):
 @app.post("/evaluate")
 def evaluate(request: EvaluateRequest):
     """
-    Answer every benchmark question against the
-    currently indexed document and score the answers
-    with ROUGE-L plus the Gemini judge.
+    Answer every benchmark question against the chosen
+    document and score the answers with ROUGE-L plus the
+    Gemini judge.
 
     A full 12-question run with the judge enabled makes
     24 Gemini calls and takes a couple of minutes.
     """
 
-    if index is None:
+    documents = require_documents()
 
-        raise HTTPException(
-            status_code=409,
-            detail="Vector store is not loaded."
-        )
+    doc_id = resolve_requested_document(
+        request.document
+    )
 
     try:
 
@@ -465,21 +567,27 @@ def evaluate(request: EvaluateRequest):
             evaluate_question(
                 item["question"],
                 item["reference_answer"],
-                index,
-                metadata,
+                doc_id,
                 request.top_k,
-                request.use_judge
+                request.use_judge,
+                store_dir=VECTORSTORE_DIR
             )
         )
 
-    documents = sorted({
-        record["source_file"]
-        for record in metadata
-    })
+    if doc_id:
+
+        evaluated = [doc_id]
+
+    else:
+
+        evaluated = [
+            entry["document_id"]
+            for entry in documents
+        ]
 
     return {
 
-        "documents": documents,
+        "documents": evaluated,
 
         "question_count": len(results),
 
@@ -520,40 +628,20 @@ if __name__ == "__main__":
 
     print("=" * 60)
 
-
-    # Build/load FAISS
-    try:
-
-        setup_vector_store()
-
-    except Exception as error:
-
-        # An empty corpus is a valid starting point now
-        # that documents can be uploaded through the API.
-        print(
-            f"\nNo vector store yet: {error}"
-        )
-
-        print(
-            "Upload a PDF at /ui to build one."
-        )
-
-
     print("\nStarting FastAPI server...")
 
     print(
-        "Frontend: http://127.0.0.1:8000/ui"
+        f"Frontend: http://{HOST}:{PORT}/ui"
     )
 
     print(
-        "API docs: http://127.0.0.1:8000/docs"
+        f"API docs: http://{HOST}:{PORT}/docs"
     )
 
     print("=" * 60)
 
-
     uvicorn.run(
         app,
-        host="127.0.0.1",
-        port=8000
+        host=HOST,
+        port=PORT
     )

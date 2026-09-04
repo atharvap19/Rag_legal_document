@@ -5,8 +5,9 @@ This package contains the individual building blocks of the pipeline:
     ingestion    -> load PDFs from disk into LangChain Documents
     chunking     -> split those Documents into retrieval-sized chunks
     embeddings   -> turn text into vectors with a sentence-transformers model
-    vector_store -> build / save / load the FAISS index
-    retrieval    -> find the chunks most similar to a question
+    vector_store -> build / save / load one FAISS store per document
+    retrieval    -> find the chunks most similar to a question inside a
+                    single document's store
     rag          -> ask Gemini to answer using only the retrieved chunks
     evaluation   -> score the pipeline against reference answers
 
